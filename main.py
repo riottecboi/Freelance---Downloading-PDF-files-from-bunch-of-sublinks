@@ -1,8 +1,11 @@
 import random
 import logging
+import json
+import re
 from time import sleep
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
@@ -17,7 +20,39 @@ class ArchitectureClass:
         self.password = password
         self.login_url = 'https://members.architecture.com.au/Web/Sign_In.aspx'
         self.main_page_url = 'https://acumen.architecture.com.au/'
-        self.driver = webdriver.Chrome(ChromeDriverManager().install())
+        # URLs to include
+        self.default_parent_url = "https://acumen.architecture.com.au/practice/negotiation-and-dispute-resolution/"
+        self.allowed_urls = [
+            "https://acumen.architecture.com.au/project",
+            "https://acumen.architecture.com.au/practice",
+            "https://acumen.architecture.com.au/resources",
+            "https://acumen.architecture.com.au/environment",
+            "https://acumen.architecture.com.au/notepacks"
+        ]
+        # Set Options to specify download directory
+        self.pdf_download_dir = "/tmp"
+        self.chrome_options = Options()
+        settings = {
+            "recentDestinations": [{
+                "id": "Save as PDF",
+                "origin": "local",
+                "account": "",
+            }],
+            "selectedDestinationId": "Save as PDF",
+            "version": 2
+        }
+        self.chrome_options.add_experimental_option("prefs", {
+            "download.extensions_to_open": "pdf",
+            'printing.print_preview_sticky_settings.appState': json.dumps(settings),
+            "download.default_directory": self.pdf_download_dir,
+            "savefile.default_directory": self.pdf_download_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+
+        })
+        self.chrome_options.add_argument('--kiosk-printing')
+        self.driver = webdriver.Chrome(ChromeDriverManager().install(),  options=self.chrome_options)
 
         # Configure logging
         self.logger = logging.getLogger(__name__)
@@ -99,5 +134,30 @@ class ArchitectureClass:
                 self.driver.refresh()
         raise TimeoutException(f"Failed to locate element with XPATH: {xpath} after {retries} retries.")
 
+    def pdf_download(self, url):
+        self.logger.info(f'Getting the {url} ...')
+        self.driver.get(url)
+        sleep(3)
+        self.logger.info(f'Downloading PDF ...')
+        self.driver.execute_script('window.print();')
+        self.logger.info(f"File PDF name {self.driver.title} saved to {self.pdf_download_dir}")
+
+    def links_gather(self):
+        try:
+            self.driver.get(self.default_parent_url)
+            sleep(3)
+            # Find the div with the specified class name
+            div_element = self.driver.find_element_by_class_name("accordion-navigation-group__container")
+
+            # Find all descendant elements within the div that contain the href attribute
+            elements = div_element.find_elements_by_xpath(".//*[@href]")
+
+            # Extract href attributes from the elements that match allowed URLs
+            href_list = [element.get_attribute("href") for element in elements if
+                         any(re.match(url_pattern, element.get_attribute("href")) for url_pattern in self.allowed_urls)]
+            return href_list
+        except Exception as e:
+            self.logger.warning(str(e))
+            return []
 
 
